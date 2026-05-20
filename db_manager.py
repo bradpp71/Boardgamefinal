@@ -1,140 +1,171 @@
-#Step-1 Import Required Libraries
+#1. Connection
 import sqlite3
-import json
 import pandas as pd
-from pathlib import Path
 
-
-#Step-2  Create Database Connection
 DB_NAME = "boardgame.db"
 
-
 def connect_db():
-    return sqlite3.connect(DB_NAME)
-#This creates/connects to your SQLite database.
-
-##Step-3Create Database Tables
-
-def create_tables():
-
+    conn = sqlite3.connect(DB_NAME, timeout=10, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+#2.Game attributes
+def get_game_attributes():
     conn = connect_db()
     cursor = conn.cursor()
 
-    # members table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS members (
-        member_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_name TEXT UNIQUE NOT NULL
-    )
-    """)
-
-    # game catalog table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS game_catalog (
-        game_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_name TEXT UNIQUE NOT NULL,
-        strategy REAL,
-        luck REAL,
-        negotiation REAL,
-        deduction REAL,
-        deck_building REAL,
-        cooperation REAL,
-        complexity REAL,
-        duration_norm REAL,
-        category TEXT,
-        players TEXT,
-        icon TEXT,
-        description TEXT
-    )
-    """)
-
-    # match records table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS match_records (
-        history_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        member_id INTEGER,
-        game_id INTEGER,
-        score INTEGER,
-        is_winner INTEGER,
-        played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-        FOREIGN KEY(member_id) REFERENCES members(member_id),
-        FOREIGN KEY(game_id) REFERENCES game_catalog(game_id)
-    )
-    """)
-
-    conn.commit()
+    cursor.execute("SELECT * FROM game_catalog")
+    rows = cursor.fetchall()
     conn.close()
 
-    ##created 3 database tables:
-    #   Table                              Purpose
-    #  members                          Stores players
-    #  game_catalog                    Stores board games
-    #  match_records                   Stores gameplay history
+    game_dict = {}
 
-    #This is the main database structure of the project.
+    for r in rows:
+        game_dict[r["game_name"]] = dict(r)
 
-#Step-4  Load games.json Into Database
-
-def load_games():
-
+    return game_dict
+#3. Play history
+def get_play_history(player_name=None):
     conn = connect_db()
     cursor = conn.cursor()
 
-    with open("data/games.json", "r", encoding="utf-8") as file:
-        games = json.load(file)
-
-    for game_name, features in games.items():
-
+    if player_name:
         cursor.execute("""
-        INSERT INTO game_catalog (
-            game_name,
-            strategy,
-            luck,
-            negotiation,
-            deduction,
-            deck_building,
-            cooperation,
-            complexity,
-            duration_norm,
-            category,
-            players,
-            icon,
-            description
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            game_name,
-            features["strategy"],
-            features["luck"],
-            features["negotiation"],
-            features["deduction"],
-            features["deck_building"],
-            features["cooperation"],
-            features["complexity"],
-            features["duration_norm"],
-            features["category"],
-            features["players"],
-            features["icon"],
-            features["description"]
-        ))
+        SELECT mr.*, m.player_name, g.game_name
+        FROM match_records mr
+        JOIN members m ON mr.member_id = m.member_id
+        JOIN game_catalog g ON mr.game_id = g.game_id
+        WHERE m.player_name = ?
+        ORDER BY mr.played_at DESC
+        """, (player_name,))
+    else:
+        cursor.execute("""
+        SELECT mr.*, m.player_name, g.game_name
+        FROM match_records mr
+        JOIN members m ON mr.member_id = m.member_id
+        JOIN game_catalog g ON mr.game_id = g.game_id
+        ORDER BY mr.played_at DESC
+        """)
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return pd.DataFrame(rows)
+#4. Add match
+def add_match_result(player_name, game_name, score, is_winner):
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    cursor.execute("INSERT OR IGNORE INTO members(player_name) VALUES (?)", (player_name,))
+    cursor.execute("SELECT member_id FROM members WHERE player_name=?", (player_name,))
+    member_id = cursor.fetchone()[0]
+
+    cursor.execute("SELECT game_id FROM game_catalog WHERE game_name=?", (game_name,))
+    game_id = cursor.fetchone()[0]
+
+    cursor.execute("""
+        INSERT INTO match_records (member_id, game_id, score, is_winner)
+        VALUES (?, ?, ?, ?)
+    """, (member_id, game_id, score, int(is_winner)))
+
     conn.commit()
     conn.close()
-#This:
+    return True
+#Update Match
+def update_match_result(history_id, score, is_winner):
+    conn = connect_db()
+    cursor = conn.cursor()
 
-# reads games.json
-# loops through all games
-# inserts them into game_catalog
+    cursor.execute("""
+        UPDATE match_records
+        SET score=?, is_winner=?
+        WHERE history_id=?
+    """, (score, int(is_winner), history_id))
 
-# The INSERT OR IGNORE prevents duplicate entries.    
+    conn.commit()
+    conn.close()
+    return True
+#6. Delete match
+def delete_match_result(history_id):
+    conn = connect_db()
+    cursor = conn.cursor()
 
+    cursor.execute("DELETE FROM match_records WHERE history_id=?", (history_id,))
+    conn.commit()
+    conn.close()
+    return True
+#7.Remove player
+def remove_player(player_name):
+    conn = connect_db()
+    cursor = conn.cursor()
 
-#Step-5  Initialize Everything
-def initialize_database():
+    cursor.execute("SELECT member_id FROM members WHERE player_name=?", (player_name,))
+    row = cursor.fetchone()
+    if not row:
+        return False
 
-    create_tables()
-    load_games()
+    member_id = row[0]
 
+    cursor.execute("DELETE FROM match_records WHERE member_id=?", (member_id,))
+    cursor.execute("DELETE FROM members WHERE member_id=?", (member_id,))
 
-#Step-6    Run Initialization
-initialize_database()
+    conn.commit()
+    conn.close()
+    return True
+#8. Top games
+def get_top_games(limit=5):
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT g.game_id, g.game_name, COUNT(*) as matches_played
+        FROM match_records mr
+        JOIN game_catalog g ON mr.game_id = g.game_id
+        GROUP BY g.game_id
+        ORDER BY matches_played DESC
+        LIMIT ?
+    """, (limit,))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [dict(r) for r in rows]
+#9. Champions
+def get_game_champions(game_id, limit=3):
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT m.player_name,
+               COUNT(*) as victory_count,
+               MAX(mr.score) as peak_score
+        FROM match_records mr
+        JOIN members m ON mr.member_id = m.member_id
+        WHERE mr.game_id=? AND mr.is_winner=1
+        GROUP BY m.player_name
+        ORDER BY victory_count DESC
+        LIMIT ?
+    """, (game_id, limit))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [dict(r) for r in rows]
+#10. Recent activity
+def get_recent_activity(limit=5):
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT m.player_name, g.game_name, mr.score, mr.is_winner, mr.played_at
+        FROM match_records mr
+        JOIN members m ON mr.member_id = m.member_id
+        JOIN game_catalog g ON mr.game_id = g.game_id
+        ORDER BY mr.played_at DESC
+        LIMIT ?
+    """, (limit,))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [dict(r) for r in rows]
+

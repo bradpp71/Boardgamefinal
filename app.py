@@ -14,7 +14,7 @@ import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
-from db_manager import get_play_history, get_game_attributes, add_match_result, delete_match_result, update_match_result, remove_player, get_top_games, get_game_champions, get_recent_activity
+from boardgame_code.database_init import get_play_history, get_game_attributes, add_match_result, delete_match_result, update_match_result, remove_player, get_top_games, get_game_champions, get_recent_activity
 from recommender import Recommender
 
 
