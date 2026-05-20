@@ -30,7 +30,7 @@ def create_tables():
 
     # game catalog table
     cursor.execute("""
-    CREATE TABLE game_catalog (
+    CREATE TABLE IF NOT EXISTS game_catalog (
         game_id INTEGER PRIMARY KEY AUTOINCREMENT,
         game_name TEXT UNIQUE NOT NULL,
         strategy REAL,
