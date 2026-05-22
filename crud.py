@@ -50,6 +50,14 @@ def add_member(name):
 
     conn.commit()
     conn.close()
+def get_all_members():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT player_name FROM members ORDER BY player_name")
+    rows = cursor.fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
 
     #Add match record
 def add_match(member_id, game_id, score, is_winner):
