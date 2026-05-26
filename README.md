@@ -78,13 +78,6 @@ board-game-tracker/
 
 ---
 
-##  Team Roles
-
-| Member | Area |
-|--------|------|
-| CY | ML Recommendation Engine (`recommender.py`, `data/`) |
-| R | Database + Backend (`db/`, MySQL schema, CRUD) |
-| yza| Frontend UI (`app.py`, `pages/`, Plotly charts) |
 
 ---
 
